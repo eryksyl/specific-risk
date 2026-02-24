@@ -455,3 +455,111 @@ else:
     **underestimate** your true risk. Individual stocks often have 'Fat Tails', meaning 
     extreme losses occur more often than the math suggests.
     """)
+
+# ==============================================================================
+# 8. ACTIVE STRATEGY: KELLY CRITERION REBALANCING
+# ==============================================================================
+st.divider()
+st.header("🎯 Active Strategy: Kelly Criterion Optimizer")
+st.markdown(r"""
+Use this module to calculate optimal portfolio weights based on **your forward-looking views**. 
+Unlike passive models, the Kelly Criterion maximizes the long-term growth of capital by exploiting the asymmetry between reward and risk.
+
+The formula used is the **Kelly Fraction**:
+$$f^* = \frac{bp - q}{b}$$
+where $b$ is the odds ($Upside/Downside$), $p$ is the probability of success, and $q$ is the probability of failure ($1-p$).
+""")
+
+# 1. Retrieve data from session
+tickers = st.session_state.tickers
+stock_returns = st.session_state.stock_returns
+current_weights = st.session_state.weights
+prices_df = np.exp(stock_returns.cumsum())
+last_prices = prices_df.iloc[-1]
+
+# 2. User Input Interface
+kelly_inputs = []
+
+with st.expander("🛠️ Configure Market Views (Expected Payoff & Probability)", expanded=True):
+    st.info("Pro Tip: Reference the 'Volatility' column in the Audit Results above to set realistic Stop Loss levels.")
+    cols = st.columns(len(tickers))
+    
+    for i, ticker in enumerate(tickers):
+        with cols[i]:
+            st.subheader(f"📍 {ticker}")
+            # Individual views
+            u_upside = st.number_input(f"Expected Upside (%)", key=f"k_up_{ticker}", value=20.0) / 100
+            u_downside = st.number_input(f"Stop Loss (%)", key=f"k_down_{ticker}", value=10.0) / 100
+            u_prob = st.slider(f"Conviction (p)", 0.0, 1.0, 0.5, key=f"k_p_{ticker}")
+            
+            # Kelly Mathematics
+            # b = Win Amount / Loss Amount
+            b = u_upside / u_downside if u_downside != 0 else 0
+            q = 1 - u_prob
+            
+            # f* calculation
+            f_star = (b * u_prob - q) / b if b > 0 else 0
+            
+            kelly_inputs.append({
+                "Ticker": ticker,
+                "Price": round(last_prices[ticker], 2),
+                "Potential (b)": b,
+                "Conviction (p)": u_prob,
+                "Raw Kelly": f_star
+            })
+
+# 3. Weight Processing (Half-Kelly for safety)
+df_k = pd.DataFrame(kelly_inputs)
+# Applying Half-Kelly to reduce drawdown volatility
+df_k["Half-Kelly Weight"] = df_k["Raw Kelly"].apply(lambda x: max(0, x / 2))
+
+# Normalizing weights to sum to 100%
+total_k = df_k["Half-Kelly Weight"].sum()
+if total_k > 0:
+    df_k["Kelly Allocation (%)"] = (df_k["Half-Kelly Weight"] / total_k)
+else:
+    df_k["Kelly Allocation (%)"] = 0
+
+# 4. Comparison Table & Chart
+st.subheader("⚖️ Allocation Comparison: Current vs. Kelly Suggestion")
+
+comparison_df = pd.DataFrame({
+    "Ticker": tickers,
+    "Current Weight (%)": [w * 100 for w in current_weights],
+    "Kelly Suggestion (%)": df_k["Kelly Allocation (%)"].values * 100
+}).set_index("Ticker")
+
+c1, c2 = st.columns([1, 1.5])
+
+with c1:
+    st.table(comparison_df.style.format("{:.2f}%"))
+
+with c2:
+    st.bar_chart(comparison_df)
+
+# 5. "What-If" Impact Analysis
+st.subheader("🧪 Portfolio 'What-If' Simulation")
+new_weights = df_k["Kelly Allocation (%)"].values
+new_portfolio_returns = (stock_returns * new_weights).sum(axis=1)
+
+def quick_audit(returns):
+    total_ret = np.exp(returns.sum())
+    n_years = len(returns) / 252
+    cagr = (total_ret ** (1 / n_years)) - 1
+    vol = returns.std() * np.sqrt(252)
+    return cagr, vol
+
+old_cagr, old_vol = quick_audit(st.session_state.portfolio_returns)
+new_cagr, new_vol = quick_audit(new_portfolio_returns)
+
+# Metric visualization
+m1, m2 = st.columns(2)
+m1.metric("CAGR (Expected Return)", f"{new_cagr:.2%}", f"{new_cagr - old_cagr:+.2%}")
+m2.metric("Volatility (Total Risk)", f"{new_vol:.2%}", f"{new_vol - old_vol:+.2%}", delta_color="inverse")
+
+
+
+st.info("""
+💡 **Analytical Insight:** If the Kelly Criterion suggests an allocation significantly different from your current one, your portfolio is not mathematically optimized for your market convictions. 
+Note the change in **Volatility**—optimizing for growth via Kelly often leads to higher portfolio variance.
+""")
