@@ -230,7 +230,7 @@ def get_metrics(returns, benchmark, rf):
     # 4. OLS Regression (Single Index Model)
     X = sm.add_constant(benchmark)
     model = sm.OLS(returns, X).fit()
-    beta = model.params[1]
+    beta = model.params.iloc[1] if len(model.params) > 1 else 0.0
     r2 = model.rsquared # This is our Diversification Index
     
     return cagr, vol, sharpe, beta, r2
